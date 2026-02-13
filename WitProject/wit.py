@@ -28,7 +28,7 @@ def init():
 
     head_file = os.path.join(wit_dir, 'HEAD')
     staging_area = os.path.join(wit_dir, 'staging_area')
-    images_dir = os.path.join(wit_dir, 'images')
+    images_dir = os.path.join(wit_dir, 'commits')
     witignore_file = os.path.join(wit_dir, '.witignore')
 
     try:
@@ -311,6 +311,127 @@ def checkout(commit_id):
     except Exception as e:
         click.secho(f"Fatal error during checkout: {e}", fg='red')
 
+@cli.command()
+def status():
+    """
+    מדפיסה את הסטטוס הנוכחי של המערכת:
+    1. קבצים ב-Staging ששונים מה-HEAD (ירוק).
+    2. קבצים לא מעוקבים (Untracked) (אדום).
+    3. קבצים ששונו בתיקייה אבל לא ב-Staging (אדום).
+    """
+
+    # 1. הגדרת נתיבים
+    base_path = os.getcwd()
+    wit_dir = os.path.join(base_path, '.wit')
+    staging_area = os.path.join(wit_dir, 'staging_area')
+    head_file = os.path.join(wit_dir, 'HEAD')
+
+    if not os.path.exists(wit_dir):
+        click.secho("Error: Not a wit repository (run 'wit init' first)", fg='red')
+        return
+
+    # טעינת רשימת ההתעלמות (להשתמש בפונקציה שלך אם קיימת, כאן שמתי דוגמה)
+    ignored_files = get_ignored_files(wit_dir)
+
+
+    # מציאת התיקייה של הקומיט האחרון (HEAD)
+
+    with open(head_file, 'r') as f:
+        commit_id = f.read().strip()
+        # נניח שהקומיטים נשמרים ב- .wit/images/commit_id
+        last_commit_dir = os.path.join(wit_dir, 'commits', commit_id, "state")
+
+    # -----------------------------------------------------------
+    # חלק 1: השוואה בין Staging Area לבין HEAD (קבצים שמוכנים לקומיט)
+    # -----------------------------------------------------------
+    changes_to_be_committed = []
+
+    # עוברים על כל הקבצים ב-staging area
+    for root, dirs, files in os.walk(staging_area):
+        for file in files:
+            full_path = os.path.join(root, file)
+            # מציאת הנתיב היחסי (כדי לדעת איפה לחפש ב-HEAD)
+            rel_path = os.path.relpath(full_path, staging_area)
+
+            # אם אין עדיין HEAD (קומיט ראשון) - הכל נחשב חדש
+            if not os.path.exists(last_commit_dir):
+                changes_to_be_committed.append(rel_path)
+            else:
+                path_in_head = os.path.join(last_commit_dir, rel_path)
+
+                # אם הקובץ לא קיים ב-HEAD או שהתוכן שלו שונה
+                if not os.path.exists(path_in_head):
+                    changes_to_be_committed.append(rel_path)
+                else:
+                    # שימוש באותה לוגיקה של compare_directories
+                    if not filecmp.cmp(full_path, path_in_head, shallow=False):
+                        changes_to_be_committed.append(rel_path)
+
+    # -----------------------------------------------------------
+    # חלק 2 + 3: השוואה בין התיקייה הנוכחית לבין Staging Area
+    # -----------------------------------------------------------
+    untracked_files = []  # קבצים שלא קיימים ב-staging
+    modified_not_staged = []  # קבצים שקיימים ב-staging אך שונים בתוכן
+
+    for root, dirs, files in os.walk(base_path):
+        # התעלמות מתיקיית .wit עצמה
+        if '.wit' in dirs:
+            dirs.remove('.wit')
+
+        for file in files:
+            full_path = os.path.join(root, file)
+            rel_path = os.path.relpath(full_path, base_path)
+
+            # בדיקה אם הקובץ ברשימת ההתעלמות
+            if rel_path in ignored_files or file in ignored_files:
+                continue
+
+            path_in_staging = os.path.join(staging_area, rel_path)
+
+            # מקרה 2: Untracked files
+            # הקובץ קיים בתיקייה אך לא ב-staging
+            if not os.path.exists(path_in_staging):
+                untracked_files.append(rel_path)
+
+            # מקרה 3: Modified files
+            # הקובץ קיים ב-staging, בודקים אם התוכן זהה
+            else:
+                # שימוש ב-filecmp (כמו בפונקציה הקודמת)
+                if not filecmp.cmp(full_path, path_in_staging, shallow=False):
+                    modified_not_staged.append(rel_path)
+
+    # -----------------------------------------------------------
+    # הדפסה (תצוגה)
+    # -----------------------------------------------------------
+
+    click.secho(f"On commit: {commit_id if commit_id != 'None' else 'No commits yet'}\n", bold=True)
+
+    # 1. Files staged but not included in the last commit
+    click.secho("1. Files staged but not included in the last commit:", fg='yellow', bold=True)
+    if changes_to_be_committed:
+        for f in sorted(changes_to_be_committed):
+            click.secho(f"\t{f}", fg='green')
+    else:
+        click.echo("\t(none)")
+    click.echo("")  # שורה ריקה
+
+    # 2. Untracked files
+    click.secho("2. Untracked files:", fg='yellow', bold=True)
+    if untracked_files:
+        for f in sorted(untracked_files):
+            click.secho(f"\t{f}", fg='red')
+    else:
+        click.echo("\t(none)")
+    click.echo("")
+
+    # 3. Files modified in the working directory but not staged
+    click.secho("3. Files modified in the working directory but not staged:", fg='yellow', bold=True)
+    if modified_not_staged:
+        for f in sorted(modified_not_staged):
+            click.secho(f"\t{f}", fg='red')
+    else:
+        click.echo("\t(none)")
+    click.echo("")
 
 if __name__ == '__main__':
     cli()
