@@ -111,7 +111,7 @@ def add(path):
             if os.path.isfile(full_path):
                 is_same = filecmp.cmp(full_path, staging_area_path, shallow=False)
             elif os.path.isdir(full_path):
-                is_same = compare_directories(full_path, staging_area_path)
+                is_same = compare_directories(full_path, staging_area_path, wit_dir)
 
             if is_same:
                 click.secho("Error: nothing has changed", fg='yellow')
@@ -141,14 +141,13 @@ def copy_to_staging(source_path, dest_path):
         click.secho(f"Failed to add {source_path}: {e}", fg='red')
 
 
-def compare_directories(dir1, dir2, ignored_files=None):
+def compare_directories(dir1, dir2, wit_dir):
     """
     משווה שתי תיקיות באופן רקורסיבי.
     מחזירה True רק אם המבנה, השמות, הסוגים (קובץ/תיקייה) והתוכן זהים לחלוטין.
     מתעלמת מקבצים שנמצאים ב-ignored_files.
     """
-    if ignored_files is None:
-        ignored_files = []
+    ignored_files = get_ignored_files(wit_dir)
 
     # 1. בדיקת קיום בסיסית
     if not os.path.exists(dir1) or not os.path.exists(dir2):
@@ -186,7 +185,7 @@ def compare_directories(dir1, dir2, ignored_files=None):
 
         # מקרה א': שניהם תיקיות -> קריאה רקורסיבית
         if os.path.isdir(path1):
-            if not compare_directories(path1, path2, ignored_files):
+            if not compare_directories(path1, path2, wit_dir):
                 return False
 
         # מקרה ב': שניהם קבצים -> השוואת תוכן (בייטים)
@@ -215,12 +214,16 @@ def commit(message):
 
     with open(head_path, 'r') as f:
         current = f.readline()
-    current_path = os.path.join(wit_dir, "commits", current, "state")
+    if current != "None":
+        current_path = os.path.join(wit_dir, "commits", current, "state")
 
-    if compare_directories(current_path, staging_area):
-        click.secho("Error: nothing to commit", fg='red')
-        return
-
+        if compare_directories(current_path, staging_area, wit_dir):
+            click.secho("Error: nothing to commit", fg='red')
+            return
+    else:
+        if not os.listdir(staging_area):
+            click.secho("Error: nothing to commit", fg='red')
+            return
     new_id = uuid.uuid1()
 
     # 3. יצירת האובייקט (בהנחה שהמחלקה Commit מיובאת או מוגדרת למעלה)
@@ -249,49 +252,28 @@ def checkout(commit_id):
     path = os.getcwd()
     wit_dir = os.path.join(path, '.wit')
     staging_area = os.path.join(wit_dir, 'staging_area')
-
-    commited_status_file = os.path.join(staging_area, '.committed')
-
-    # ---------------------------------------------------------
-    # בדיקה האם יש שינויים שלא נשמרו (false בקובץ commited)
-    # ---------------------------------------------------------
-    if os.path.exists(commited_status_file):
-        try:
-            with open(commited_status_file, 'r') as f:
-                status = f.read().strip()
-
-            # אם כתוב false - עוצרים ומתריעים
-            if status == 'false':
-                click.secho("Error: You have uncommitted changes in the staging area.", fg='red')
-                click.secho("These files will be lost if you checkout now. Please commit first.", fg='yellow')
-                return
-            if compare_directories(staging_area, path):
-                click.secho("Error: You have uncommitted changes ", fg='red')
-                click.secho("These files will be lost if you checkout now. Please add and commit first.", fg='yellow')
-                return
-
-        except Exception as e:
-            # אם לא הצלחנו לקרוא את הקובץ, אפשר להחליט אם לעצור או להמשיך.
-            # כאן בחרתי להזהיר אך לא לעצור, אבל לשיקולך.
-            click.secho(f"Warning: Could not read commit status: {e}", fg='yellow')
-
-
-    # בדיקה שה-ID תקין
+    head_path = os.path.join(wit_dir, 'HEAD')
     commit_path = os.path.join(wit_dir, 'commits', commit_id)
-    # נניח ששמרנו את הקבצים בתוך תיקיית state בתוך הקומיט (לפי ה-save שבנינו קודם)
     commit_state_path = os.path.join(commit_path, 'state')
+    ignored_files = get_ignored_files(wit_dir)
+
+    if not os.path.exists(wit_dir):
+        click.secho("Error: .wit directory not found. Please run 'wit init' first.", fg='red')
+        return
 
     if not os.path.exists(commit_state_path):
         click.secho(f"Error: Commit ID '{commit_id}' not found.", fg='red')
         return
 
-    # 1. טעינת רשימת ההתעלמות (כדי לדעת על מה להגן)
-    ignored_files = get_ignored_files(wit_dir)
+    with open(head_path, 'r') as f:
+        current = f.readline()
+    current_path = os.path.join(wit_dir, "commits", current, "state")
+
+    if not compare_directories(current_path, path, wit_dir):
+        click.secho("warning: changes not commited")
+        return
 
     try:
-        # ---------------------------------------------------------
-        # שלב א': ניקוי התיקייה הנוכחית (מחיקת קבצים שלא ב-ignore)
-        # ---------------------------------------------------------
         for item in os.listdir(path):
             # הגנה על קבצים מוחרגים ועל תיקיית .wit עצמה
             if item in ignored_files:
