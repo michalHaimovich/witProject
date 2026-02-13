@@ -31,9 +31,6 @@ def init():
     images_dir = os.path.join(wit_dir, 'images')
     witignore_file = os.path.join(wit_dir, '.witignore')
 
-    # --- תוספת: הנתיב לקובץ הסטטוס בתוך ה-staging ---
-    status_file = os.path.join(staging_area, '.committed')
-
     try:
         os.makedirs(staging_area, exist_ok=True)
         os.makedirs(images_dir, exist_ok=True)
@@ -46,29 +43,10 @@ def init():
         with open(witignore_file, 'w') as f:
             pass
 
-        # --- תוספת: יצירת קובץ הסטטוס עם הערך False ---
-        with open(status_file, 'w') as f:
-            f.write("False")
-
         click.secho(f"Successfully initialized .wit in: {path}", fg='green')
 
     except OSError as e:
         click.echo(f"An error occurred: {e}")
-
-
-def update_commited_file(staging_area_path, content='false'):
-    """
-    Updates the content of the 'commited' file in the staging area.
-    content: The string to write ('true' or 'false').
-    """
-    status_file = os.path.join(staging_area_path, '.committed')
-
-    try:
-        with open(status_file, 'w') as f:
-            f.write(content)
-    except Exception as e:
-        click.secho(f"Warning: Could not update 'commited' file: {e}", fg='yellow')
-
 
 @cli.command()
 @click.argument('path')
@@ -110,8 +88,6 @@ def add(path):
             count += 1
 
         click.secho(f"Added {count} files to staging area.", fg='green')
-        update_commited_file(staging_area,'False')
-
     # מקרה 2: הוספת קובץ ספציפי
     else:
         # --- השינוי המרכזי: אם הקובץ ברשימת ההתעלמות - כאילו לא קיים ---
@@ -230,18 +206,21 @@ def commit(message):
     path = os.getcwd()
     wit_dir = os.path.join(path, '.wit')
     head_path = os.path.join(wit_dir, 'HEAD')
-    commited_status_file=os.path.join(wit_dir,"staging_area",".committed")
-    with open(commited_status_file, 'r') as f:
-        status = f.read().strip()
-
-    if status == "True":
-        click.secho("Error: nothing to commit.", fg='red')
-        return
+    staging_area = os.path.join(wit_dir, "staging_area")
 
     # 1. בדיקה שה-init בוצע
     if not os.path.exists(wit_dir):
         click.secho("Error: .wit directory not found. Please run 'wit init' first.", fg='red')
         return
+
+    with open(head_path, 'r') as f:
+        current = f.readline()
+    current_path = os.path.join(wit_dir, "commits", current, "state")
+
+    if compare_directories(current_path, staging_area):
+        click.secho("Error: nothing to commit", fg='red')
+        return
+
     new_id = uuid.uuid1()
 
     # 3. יצירת האובייקט (בהנחה שהמחלקה Commit מיובאת או מוגדרת למעלה)
@@ -256,7 +235,6 @@ def commit(message):
         with open(head_path, 'w') as f:
             f.write(new_id.__str__())
 
-        update_commited_file(os.path.join(wit_dir, "staging_area"), 'True')
         click.secho(f"Commit created successfully! ID: {new_id}, Message: {message}", fg='green')
 
     except Exception as e:
