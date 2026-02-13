@@ -2,7 +2,7 @@ import filecmp
 import shutil
 import uuid
 from Commit import Commit
-import click
+import ctypes
 import os
 import Exeptions
 
@@ -13,7 +13,6 @@ def get_ignored_files(wit_dir):
     return {'.wit'} | ({line.strip() for line in open(p) if line.strip() and not line.strip().startswith('#')} if os.path.exists(p) else set())
 
 
-
 def init(path):
 
     wit_dir = os.path.join(path, '.wit')
@@ -21,15 +20,23 @@ def init(path):
     if os.path.exists(wit_dir):
         raise Exeptions.WitAlreadyExistsError()
 
-
     head_file = os.path.join(wit_dir, 'HEAD')
     staging_area = os.path.join(wit_dir, 'staging_area')
     images_dir = os.path.join(wit_dir, 'commits')
     witignore_file = os.path.join(wit_dir, '.witignore')
 
-
     os.makedirs(staging_area, exist_ok=True)
     os.makedirs(images_dir, exist_ok=True)
+
+    if os.name == 'nt':  # בדיקה אם רצים על Windows
+        file_attribute_hidden = 0x02
+        try:
+            # שימוש ב-Windows API כדי להפוך את התיקייה למוסתרת
+            ret = ctypes.windll.kernel32.SetFileAttributesW(wit_dir, file_attribute_hidden)
+            if not ret:
+                print("Warning: Could not set hidden attribute on .wit directory.")
+        except Exception:
+            print("Warning: Could not access Windows API to hide directory.")
 
     # יצירת HEAD
     with open(head_file, 'w') as f:
