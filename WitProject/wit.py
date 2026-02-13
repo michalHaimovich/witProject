@@ -4,11 +4,7 @@ import uuid
 from Commit import Commit
 import click
 import os
-
-
-@click.group()
-def cli():
-    pass
+import Exeptions
 
 
 #שימוש ביחודיות של פייתון אתחול מבנה נתונים בשורה אחת!!!!!😁😁😁😁😁
@@ -17,39 +13,37 @@ def get_ignored_files(wit_dir):
     return {'.wit'} | ({line.strip() for line in open(p) if line.strip() and not line.strip().startswith('#')} if os.path.exists(p) else set())
 
 
-@cli.command()
-def init():
-    path = os.getcwd()
+
+def init(path):
+
     wit_dir = os.path.join(path, '.wit')
 
     if os.path.exists(wit_dir):
-        click.secho(f"Here is .wit: {wit_dir}", fg='yellow')
-        return
+        raise Exeptions.WitAlreadyExistsError()
+
 
     head_file = os.path.join(wit_dir, 'HEAD')
     staging_area = os.path.join(wit_dir, 'staging_area')
     images_dir = os.path.join(wit_dir, 'commits')
     witignore_file = os.path.join(wit_dir, '.witignore')
 
-    try:
-        os.makedirs(staging_area, exist_ok=True)
-        os.makedirs(images_dir, exist_ok=True)
 
-        # יצירת HEAD
-        with open(head_file, 'w') as f:
-            f.write("None")
+    os.makedirs(staging_area, exist_ok=True)
+    os.makedirs(images_dir, exist_ok=True)
 
-        # יצירת .witignore
-        with open(witignore_file, 'w') as f:
-            pass
+    # יצירת HEAD
+    with open(head_file, 'w') as f:
+        f.write("None")
 
-        click.secho(f"Successfully initialized .wit in: {path}", fg='green')
+     # יצירת .witignore
+    with open(witignore_file, 'w') as f:
+        pass
 
-    except OSError as e:
-        click.echo(f"An error occurred: {e}")
 
-@cli.command()
-@click.argument('path')
+
+
+
+
 def add(path):
     """Adds a file or all files (.) to the staging area."""
 
@@ -58,8 +52,7 @@ def add(path):
     staging_area = os.path.join(wit_dir, 'staging_area')
 
     if not os.path.exists(wit_dir):
-        click.secho("Error: Not a wit repository (run 'wit init' first)", fg='red')
-        return
+        raise Exeptions.WitRepoNotFoundError()
 
     # --- תוספת: טעינת רשימת ההתעלמות ---
     ignored_files = get_ignored_files(wit_dir)
@@ -70,7 +63,7 @@ def add(path):
         # שהיא משווה את כל התיקייה, זה עלול להיות בעייתי אם יש קבצים להתעלמות שכבר ב-staging)
 
         files_to_add = os.listdir(current_dir)
-        count = 0
+
         for file_name in files_to_add:
 
             # --- השינוי המרכזי: בדיקה מול ה-witignore ---
@@ -85,9 +78,9 @@ def add(path):
             dest_path = os.path.join(staging_area, file_name)
 
             copy_to_staging(full_path, dest_path)
-            count += 1
 
-        click.secho(f"Added {count} files to staging area.", fg='green')
+
+
     # מקרה 2: הוספת קובץ ספציפי
     else:
         # --- השינוי המרכזי: אם הקובץ ברשימת ההתעלמות - כאילו לא קיים ---
@@ -99,7 +92,7 @@ def add(path):
         full_path = os.path.abspath(path)
 
         if not os.path.exists(full_path):
-            click.secho(f"Error: File '{path}' not found.", fg='red')
+            raise FileNotFoundError()
             return
 
         staging_area_path = os.path.join(staging_area, path)
@@ -114,8 +107,8 @@ def add(path):
                 is_same = compare_directories(full_path, staging_area_path, wit_dir)
 
             if is_same:
-                click.secho("Error: nothing has changed", fg='yellow')
-                return
+                raise Exeptions.WitNoChangesError()
+
 
         if os.path.isdir(full_path):
             # כאן אפשר להוסיף לוגיקה שאם זו תיקייה, לא להעתיק ממנה קבצים מוחרגים
@@ -127,18 +120,14 @@ def add(path):
         dest_path = os.path.join(staging_area, os.path.basename(full_path))
         copy_to_staging(full_path, dest_path)
 
-        click.secho(f"Added '{path}' to staging area.", fg='green')
-
 
 def copy_to_staging(source_path, dest_path):
     """פונקציית עזר להעתקת קובץ בודד ל-staging"""
-    try:
-        if os.path.isdir(source_path):
-            shutil.copytree(source_path, dest_path, dirs_exist_ok=True)
-        else:
-            shutil.copy2(source_path, dest_path)
-    except Exception as e:
-        click.secho(f"Failed to add {source_path}: {e}", fg='red')
+
+    if os.path.isdir(source_path):
+        shutil.copytree(source_path, dest_path, dirs_exist_ok=True)
+    else:
+        shutil.copy2(source_path, dest_path)
 
 
 def compare_directories(dir1, dir2, wit_dir):
@@ -197,8 +186,7 @@ def compare_directories(dir1, dir2, wit_dir):
     return True
 
 
-@cli.command()
-@click.option('-m', '--message', required=True, help='Commit message')
+
 def commit(message):
     """Creates a new commit with a running ID."""
 
@@ -209,8 +197,8 @@ def commit(message):
 
     # 1. בדיקה שה-init בוצע
     if not os.path.exists(wit_dir):
-        click.secho("Error: .wit directory not found. Please run 'wit init' first.", fg='red')
-        return
+       raise Exeptions.WitRepoNotFoundError()
+
 
     with open(head_path, 'r') as f:
         current = f.readline()
@@ -218,34 +206,32 @@ def commit(message):
         current_path = os.path.join(wit_dir, "commits", current, "state")
 
         if compare_directories(current_path, staging_area, wit_dir):
-            click.secho("Error: nothing to commit", fg='red')
-            return
+            raise Exeptions.WitNoChangesError()
+
     else:
         if not os.listdir(staging_area):
-            click.secho("Error: nothing to commit", fg='red')
-            return
+            raise Exeptions.WitNoChangesError()
+
     new_id = uuid.uuid1()
 
     # 3. יצירת האובייקט (בהנחה שהמחלקה Commit מיובאת או מוגדרת למעלה)
     # אנו מעבירים לו את ה-ID שחישבנו ואת ההודעה מהדגל -m
     commit_obj = Commit(commit_id=new_id, message=message)
 
-    try:
-        # 4. שמירה (יצירת התיקיות והעתקת ה-staging)
-        commit_obj.save(wit_dir)
+
+
+    commit_obj.save(wit_dir)
 
         # 5. עדכון ה-HEAD למספר החדש!
-        with open(head_path, 'w') as f:
-            f.write(new_id.__str__())
+    with open(head_path, 'w') as f:
+        f.write(new_id.__str__())
 
-        click.secho(f"Commit created successfully! ID: {new_id}, Message: {message}", fg='green')
-
-    except Exception as e:
-        click.secho(f"Error creating commit: {e}", fg='red')
+    return new_id
 
 
-@cli.command()
-@click.argument('commit_id')
+
+
+
 def checkout(commit_id):
     """Restores the state of a specific commit ID."""
 
@@ -258,60 +244,54 @@ def checkout(commit_id):
     ignored_files = get_ignored_files(wit_dir)
 
     if not os.path.exists(wit_dir):
-        click.secho("Error: .wit directory not found. Please run 'wit init' first.", fg='red')
-        return
+       raise  Exeptions.WitRepoNotFoundError()
+
 
     if not os.path.exists(commit_state_path):
-        click.secho(f"Error: Commit ID '{commit_id}' not found.", fg='red')
-        return
+       raise  Exeptions.WitReferenceNotFoundError()
+
 
     with open(head_path, 'r') as f:
         current = f.readline()
     current_path = os.path.join(wit_dir, "commits", current, "state")
 
     if not compare_directories(current_path, path, wit_dir):
-        click.secho("warning: changes not commited")
-        return
+        raise  Exeptions.WitUncommittedChangesError()
 
-    try:
-        for item in os.listdir(path):
-            # הגנה על קבצים מוחרגים ועל תיקיית .wit עצמה
-            if item in ignored_files:
-                continue
+    for item in os.listdir(path):
+        # הגנה על קבצים מוחרגים ועל תיקיית .wit עצמה
+        if item in ignored_files:
+            continue
 
-            full_path = os.path.join(path, item)
+        full_path = os.path.join(path, item)
 
-            # מחיקה בטוחה (בין אם זה קובץ או תיקייה)
-            if os.path.isfile(full_path) or os.path.islink(full_path):
-                os.remove(full_path)
-            elif os.path.isdir(full_path):
-                shutil.rmtree(full_path)
+        # מחיקה בטוחה (בין אם זה קובץ או תיקייה)
+        if os.path.isfile(full_path) or os.path.islink(full_path):
+            os.remove(full_path)
+        elif os.path.isdir(full_path):
+            shutil.rmtree(full_path)
 
-        # ---------------------------------------------------------
-        # שלב ב': העתקת הקבצים מה-Commit לתיקייה הנוכחית
-        # ---------------------------------------------------------
-        # הפונקציה copytree עם dirs_exist_ok=True מעתיקה ודורסת אם צריך
-        shutil.copytree(commit_state_path, path, dirs_exist_ok=True)
+    # ---------------------------------------------------------
+    # שלב ב': העתקת הקבצים מה-Commit לתיקייה הנוכחית
+    # ---------------------------------------------------------
+    # הפונקציה copytree עם dirs_exist_ok=True מעתיקה ודורסת אם צריך
+    shutil.copytree(commit_state_path, path, dirs_exist_ok=True)
 
-        # ---------------------------------------------------------
-        # שלב ג': עדכון ה-Staging Area וה-HEAD
-        # ---------------------------------------------------------
-        # ה-staging צריך להיות עכשיו זהה בדיוק למה שעשינו לו checkout
-        if os.path.exists(staging_area):
-            shutil.rmtree(staging_area)
-        shutil.copytree(commit_state_path, staging_area)
+    # ---------------------------------------------------------
+    # שלב ג': עדכון ה-Staging Area וה-HEAD
+    # ---------------------------------------------------------
+    # ה-staging צריך להיות עכשיו זהה בדיוק למה שעשינו לו checkout
+    if os.path.exists(staging_area):
+        shutil.rmtree(staging_area)
+    shutil.copytree(commit_state_path, staging_area)
 
-        # עדכון ה-HEAD שיצביע על הקומיט הנוכחי
-        head_file = os.path.join(wit_dir, 'HEAD')
-        with open(head_file, 'w') as f:
-            f.write(commit_id)
+    # עדכון ה-HEAD שיצביע על הקומיט הנוכחי
+    head_file = os.path.join(wit_dir, 'HEAD')
+    with open(head_file, 'w') as f:
+        f.write(commit_id)
 
-        click.secho(f"HEAD is now at {commit_id}", fg='green')
 
-    except Exception as e:
-        click.secho(f"Fatal error during checkout: {e}", fg='red')
 
-@cli.command()
 def status():
     """
     מדפיסה את הסטטוס הנוכחי של המערכת:
@@ -327,8 +307,8 @@ def status():
     head_file = os.path.join(wit_dir, 'HEAD')
 
     if not os.path.exists(wit_dir):
-        click.secho("Error: Not a wit repository (run 'wit init' first)", fg='red')
-        return
+        raise  Exeptions.WitRepoNotFoundError()
+
 
     # טעינת רשימת ההתעלמות (להשתמש בפונקציה שלך אם קיימת, כאן שמתי דוגמה)
     ignored_files = get_ignored_files(wit_dir)
@@ -404,36 +384,10 @@ def status():
     # הדפסה (תצוגה)
     # -----------------------------------------------------------
 
-    click.secho(f"On commit: {commit_id if commit_id != 'None' else 'No commits yet'}\n", bold=True)
+    return commit_id, changes_to_be_committed, untracked_files, modified_not_staged
 
-    # 1. Files staged but not included in the last commit
-    click.secho("1. Files staged but not included in the last commit:", fg='yellow', bold=True)
-    if changes_to_be_committed:
-        for f in sorted(changes_to_be_committed):
-            click.secho(f"\t{f}", fg='green')
-    else:
-        click.echo("\t(none)")
-    click.echo("")  # שורה ריקה
 
-    # 2. Untracked files
-    click.secho("2. Untracked files:", fg='yellow', bold=True)
-    if untracked_files:
-        for f in sorted(untracked_files):
-            click.secho(f"\t{f}", fg='red')
-    else:
-        click.echo("\t(none)")
-    click.echo("")
 
-    # 3. Files modified in the working directory but not staged
-    click.secho("3. Files modified in the working directory but not staged:", fg='yellow', bold=True)
-    if modified_not_staged:
-        for f in sorted(modified_not_staged):
-            click.secho(f"\t{f}", fg='red')
-    else:
-        click.echo("\t(none)")
-    click.echo("")
 
-if __name__ == '__main__':
-    cli()
 
 

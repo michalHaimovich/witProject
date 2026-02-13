@@ -1,2 +1,2 @@
 [console_scripts]
-wit = wit:cli
+wit = cliWit:cli

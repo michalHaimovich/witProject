@@ -1,3 +1,5 @@
+Exeptions.py
+cliWit.py
 setup.py
 wit.py
 wit.egg-info/PKG-INFO
