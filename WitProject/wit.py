@@ -7,9 +7,32 @@ import os
 import Exeptions
 
 
+def _get_repo_context():
+    """
+    פונקציה פנימית שמכינה את כל הנתיבים ובודקת תקינות.
+    מחזירה מילון עם כל הנתיבים הרלוונטיים.
+    """
+    base_path = os.getcwd()
+    wit_dir = os.path.join(base_path, '.wit')
+
+    # בדיקת תקינות - האם זו בכלל תיקיית wit?
+    if not os.path.exists(wit_dir):
+        raise Exeptions.WitRepoNotFoundError()
+
+    # הגדרת נתיבים
+    staging_area = os.path.join(wit_dir, 'staging_area')
+    commits_dir = os.path.join(wit_dir, 'commits')
+    head_file = os.path.join(wit_dir, 'HEAD')
+
+    # טעינת התעלמות (התיקון מהשאלה הקודמת: הקובץ בחוץ)
+    ignored_files = get_ignored_files(wit_dir)
+
+    return base_path, wit_dir, staging_area, commits_dir, head_file, ignored_files
+
+
 #שימוש ביחודיות של פייתון אתחול מבנה נתונים בשורה אחת!!!!!😁😁😁😁😁
-def get_ignored_files(wit_dir):
-    p = os.path.join(wit_dir, '.witignore')
+def get_ignored_files(path):
+    p = os.path.join(path, '.witignore')
     return {'.wit'} | ({line.strip() for line in open(p) if line.strip() and not line.strip().startswith('#')} if os.path.exists(p) else set())
 
 
@@ -23,7 +46,7 @@ def init(path):
     head_file = os.path.join(wit_dir, 'HEAD')
     staging_area = os.path.join(wit_dir, 'staging_area')
     images_dir = os.path.join(wit_dir, 'commits')
-    witignore_file = os.path.join(wit_dir, '.witignore')
+    witignore_file = os.path.join(path, '.witignore')
 
     os.makedirs(staging_area, exist_ok=True)
     os.makedirs(images_dir, exist_ok=True)
@@ -47,22 +70,9 @@ def init(path):
         pass
 
 
-
-
-
-
 def add(path):
     """Adds a file or all files (.) to the staging area."""
-
-    current_dir = os.getcwd()
-    wit_dir = os.path.join(current_dir, '.wit')
-    staging_area = os.path.join(wit_dir, 'staging_area')
-
-    if not os.path.exists(wit_dir):
-        raise Exeptions.WitRepoNotFoundError()
-
-    # --- תוספת: טעינת רשימת ההתעלמות ---
-    ignored_files = get_ignored_files(wit_dir)
+    current_dir, wit_dir, staging_area, _, _, ignored_files = _get_repo_context
 
     # מקרה 1: הוספת כל הקבצים (.)
     if path == ".":
@@ -76,7 +86,6 @@ def add(path):
             # --- השינוי המרכזי: בדיקה מול ה-witignore ---
             if file_name in ignored_files:
                 continue
-            # ---------------------------------------------
 
             full_path = os.path.join(current_dir, file_name)
 
@@ -86,21 +95,17 @@ def add(path):
 
             copy_to_staging(full_path, dest_path)
 
-
-
     # מקרה 2: הוספת קובץ ספציפי
     else:
         # --- השינוי המרכזי: אם הקובץ ברשימת ההתעלמות - כאילו לא קיים ---
         if path in ignored_files:
-            click.secho(f"Error: File '{path}' not found (ignored by .witignore).", fg='red')
-            return
+            raise FileNotFoundError()
         # ---------------------------------------------------------------
 
         full_path = os.path.abspath(path)
 
         if not os.path.exists(full_path):
             raise FileNotFoundError()
-            return
 
         staging_area_path = os.path.join(staging_area, path)
 
@@ -115,7 +120,6 @@ def add(path):
 
             if is_same:
                 raise Exeptions.WitNoChangesError()
-
 
         if os.path.isdir(full_path):
             # כאן אפשר להוסיף לוגיקה שאם זו תיקייה, לא להעתיק ממנה קבצים מוחרגים
@@ -137,13 +141,13 @@ def copy_to_staging(source_path, dest_path):
         shutil.copy2(source_path, dest_path)
 
 
-def compare_directories(dir1, dir2, wit_dir):
+def compare_directories(dir1, dir2, path):
     """
     משווה שתי תיקיות באופן רקורסיבי.
     מחזירה True רק אם המבנה, השמות, הסוגים (קובץ/תיקייה) והתוכן זהים לחלוטין.
     מתעלמת מקבצים שנמצאים ב-ignored_files.
     """
-    ignored_files = get_ignored_files(wit_dir)
+    ignored_files = get_ignored_files(path)
 
     # 1. בדיקת קיום בסיסית
     if not os.path.exists(dir1) or not os.path.exists(dir2):
@@ -181,7 +185,7 @@ def compare_directories(dir1, dir2, wit_dir):
 
         # מקרה א': שניהם תיקיות -> קריאה רקורסיבית
         if os.path.isdir(path1):
-            if not compare_directories(path1, path2, wit_dir):
+            if not compare_directories(path1, path2, path):
                 return False
 
         # מקרה ב': שניהם קבצים -> השוואת תוכן (בייטים)
@@ -196,16 +200,7 @@ def compare_directories(dir1, dir2, wit_dir):
 
 def commit(message):
     """Creates a new commit with a running ID."""
-
-    path = os.getcwd()
-    wit_dir = os.path.join(path, '.wit')
-    head_path = os.path.join(wit_dir, 'HEAD')
-    staging_area = os.path.join(wit_dir, "staging_area")
-
-    # 1. בדיקה שה-init בוצע
-    if not os.path.exists(wit_dir):
-       raise Exeptions.WitRepoNotFoundError()
-
+    path, wit_dir, staging_area,  _, head_path, ignored_files = _get_repo_context
 
     with open(head_path, 'r') as f:
         current = f.readline()
@@ -225,45 +220,30 @@ def commit(message):
     # אנו מעבירים לו את ה-ID שחישבנו ואת ההודעה מהדגל -m
     commit_obj = Commit(commit_id=new_id, message=message)
 
-
-
     commit_obj.save(wit_dir)
 
-        # 5. עדכון ה-HEAD למספר החדש!
     with open(head_path, 'w') as f:
         f.write(new_id.__str__())
 
     return new_id
 
 
-
-
-
 def checkout(commit_id):
     """Restores the state of a specific commit ID."""
+    path, wit_dir, staging_area, _, head_path, ignored_files = _get_repo_context
 
-    path = os.getcwd()
-    wit_dir = os.path.join(path, '.wit')
-    staging_area = os.path.join(wit_dir, 'staging_area')
-    head_path = os.path.join(wit_dir, 'HEAD')
     commit_path = os.path.join(wit_dir, 'commits', commit_id)
     commit_state_path = os.path.join(commit_path, 'state')
-    ignored_files = get_ignored_files(wit_dir)
-
-    if not os.path.exists(wit_dir):
-       raise  Exeptions.WitRepoNotFoundError()
-
 
     if not os.path.exists(commit_state_path):
-       raise  Exeptions.WitReferenceNotFoundError()
-
+       raise Exeptions.WitReferenceNotFoundError()
 
     with open(head_path, 'r') as f:
         current = f.readline()
     current_path = os.path.join(wit_dir, "commits", current, "state")
 
     if not compare_directories(current_path, path, wit_dir):
-        raise  Exeptions.WitUncommittedChangesError()
+        raise Exeptions.WitUncommittedChangesError()
 
     for item in os.listdir(path):
         # הגנה על קבצים מוחרגים ועל תיקיית .wit עצמה
@@ -298,7 +278,6 @@ def checkout(commit_id):
         f.write(commit_id)
 
 
-
 def status():
     """
     מדפיסה את הסטטוס הנוכחי של המערכת:
@@ -306,26 +285,12 @@ def status():
     2. קבצים לא מעוקבים (Untracked) (אדום).
     3. קבצים ששונו בתיקייה אבל לא ב-Staging (אדום).
     """
-
-    # 1. הגדרת נתיבים
-    base_path = os.getcwd()
-    wit_dir = os.path.join(base_path, '.wit')
-    staging_area = os.path.join(wit_dir, 'staging_area')
-    head_file = os.path.join(wit_dir, 'HEAD')
-
-    if not os.path.exists(wit_dir):
-        raise  Exeptions.WitRepoNotFoundError()
-
-
-    # טעינת רשימת ההתעלמות (להשתמש בפונקציה שלך אם קיימת, כאן שמתי דוגמה)
-    ignored_files = get_ignored_files(wit_dir)
-
+    base_path, wit_dir, staging_area, _, head_file, ignored_files = _get_repo_context
 
     # מציאת התיקייה של הקומיט האחרון (HEAD)
 
     with open(head_file, 'r') as f:
         commit_id = f.read().strip()
-        # נניח שהקומיטים נשמרים ב- .wit/images/commit_id
         last_commit_dir = os.path.join(wit_dir, 'commits', commit_id, "state")
 
     # -----------------------------------------------------------
